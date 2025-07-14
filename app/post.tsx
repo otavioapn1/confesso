@@ -95,7 +95,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     minHeight: 44,
     padding: 10,
-    outline: 'none',
   },
 });
 

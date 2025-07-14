@@ -38,7 +38,7 @@ function formatDate(date: any) {
 
 const { width } = Dimensions.get('window');
 const isMobile = width < 500;
-const CARD_WIDTH = isMobile ? width - 32 : Math.min(width * 0.95, 420);
+const CARD_WIDTH = Math.min(Dimensions.get('window').width - 32, 320);
 
 const styles = StyleSheet.create({
   gradient: { flex: 1, minHeight: '100%' },
@@ -188,10 +188,20 @@ export default function FeedScreen() {
   const [originalMunicipio, setOriginalMunicipio] = useState('');
   const [disableRadius, setDisableRadius] = useState(false);
 
-  // Adicionar estados para sidebar mobile
-  const [sidebarOpen, setSidebarOpen] = useState(false); // sempre começa fechado no mobile
-  // Adicionar estado para exibir/ocultar sidebar no web
-  const [sidebarVisible, setSidebarVisible] = useState(true);
+  // Sidebar/drawer responsivo
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile: inicia fechado
+  const isWeb = Platform.OS === 'web';
+  const [windowWidth, setWindowWidth] = useState(
+    Platform.OS === 'web' && typeof window !== 'undefined' ? window.innerWidth : 1200
+  );
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      const handleResize = () => setWindowWidth(window.innerWidth);
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }
+  }, []);
+  const showSidebarWeb = Platform.OS === 'web' && windowWidth > 700;
 
   // Remover injeção de CSS global para header sticky e responsividade
   // Remover lógica de showHeader e qualquer referência ao header/topo
@@ -457,10 +467,10 @@ export default function FeedScreen() {
   const numColumns = React.useMemo(() => {
     if (Platform.OS !== 'web') return getNumColumns();
     // Para web, calcula baseado na largura da janela e sidebar
-    const sidebarW = sidebarVisible ? 240 : 0;
-    const available = window.innerWidth - sidebarW - 80;
+    const sidebarW = showSidebarWeb ? 240 : 0;
+    const available = windowWidth - sidebarW - 80;
     return Math.max(1, Math.floor(available / 380));
-  }, [sidebarVisible, typeof window !== 'undefined' ? window.innerWidth : 1200]);
+  }, [showSidebarWeb, windowWidth]);
 
   const shouldBlur = !locationGranted;
 
@@ -470,6 +480,12 @@ export default function FeedScreen() {
   // Remover opções de estados/municípios
   const estadosOptions = [{ label: 'Selecione o estado', value: '' }, ...estados.map(uf => ({ label: uf.name, value: uf.id }))];
   const municipiosOptions = [{ label: 'Selecione o município', value: '' }, ...municipios.map(m => ({ label: m, value: m }))];
+
+  // Ajuste: container principal com ScrollView no mobile
+  const MainContainer = Platform.OS === 'web' ? View : ScrollView;
+  const mainContainerProps = Platform.OS === 'web'
+    ? { style: { flex: 1 } }
+    : { contentContainerStyle: { flexGrow: 1, minHeight: 0, paddingBottom: 120 } };
 
   if (locationError || (!location && !locationLoading)) {
     return (
@@ -497,9 +513,9 @@ export default function FeedScreen() {
 
   return (
     <ResponsiveLinearGradient colors={["#0f0c29", "#302b63", "#24243e"]} style={styles.gradient}>
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView style={[styles.safe, { minHeight: '100%', flex: 1 }]}>
         {/* SIDEBAR WEB */}
-        {Platform.OS === 'web' && sidebarVisible && (
+        {showSidebarWeb && (
           <div style={{
             position: 'fixed',
             left: 0,
@@ -516,7 +532,7 @@ export default function FeedScreen() {
             boxShadow: '2px 0 16px #0002',
             backdropFilter: 'blur(6px)',
           }}>
-            <button onClick={() => setSidebarVisible(false)} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', color: '#a5b4fc', fontSize: 20, cursor: 'pointer', marginBottom: 8, marginRight: 2 }}>×</button>
+            <button onClick={() => setSidebarOpen(false)} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', color: '#a5b4fc', fontSize: 20, cursor: 'pointer', marginBottom: 8, marginRight: 2 }}>×</button>
             <div style={{ marginBottom: 12, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13, marginBottom: 4, textAlign: 'center' }}>Raio:</Text>
               <div style={{ width: 150, maxWidth: '100%', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -544,8 +560,8 @@ export default function FeedScreen() {
             </div>
           </div>
         )}
-        {Platform.OS === 'web' && !sidebarVisible && (
-          <button onClick={() => setSidebarVisible(true)} style={{ position: 'fixed', top: 14, left: 14, zIndex: 101, background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 18, cursor: 'pointer' }}>☰ Filtros</button>
+        {Platform.OS === 'web' && !showSidebarWeb && (
+          <button onClick={() => setSidebarOpen(true)} style={{ position: 'fixed', top: 14, left: 14, zIndex: 101, background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 18, cursor: 'pointer' }}>☰ Filtros</button>
         )}
         {/* SIDEBAR MOBILE (off-canvas) */}
         {Platform.OS !== 'web' && (
@@ -557,34 +573,40 @@ export default function FeedScreen() {
               <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 20 }}>☰ Filtros</Text>
             </TouchableOpacity>
             {sidebarOpen && (
-              <View style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#181830ee', zIndex: 300, paddingTop: 48, paddingHorizontal: 24 }}>
-                <TouchableOpacity style={{ position: 'absolute', top: 24, right: 24, zIndex: 301 }} onPress={() => setSidebarOpen(false)}>
-                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 28 }}>×</Text>
-                </TouchableOpacity>
-                <View style={{ marginBottom: 24 }}>
-                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>Filtrar segredos em até:</Text>
-                  <RadiusSlider value={radius} onChange={disableRadius ? () => {} : setRadius} />
-                  <Text style={{ color: '#a5b4fc', fontWeight: 'bold', fontSize: 16, marginTop: 8 }}>{radius} km</Text>
+              <Pressable
+                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#181830ee', zIndex: 300, paddingTop: 48, paddingHorizontal: 24, justifyContent: 'flex-start' }}
+                onPress={() => setSidebarOpen(false)}
+              >
+                <View onStartShouldSetResponder={() => true} onTouchStart={e => e.stopPropagation()} style={{ width: '100%' }}>
+                  <TouchableOpacity style={{ position: 'absolute', top: 24, right: 24, zIndex: 301 }} onPress={() => setSidebarOpen(false)}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 28 }}>×</Text>
+                  </TouchableOpacity>
+                  <View style={{ marginBottom: 24 }}>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>Filtrar segredos em até:</Text>
+                    <RadiusSlider value={radius} onChange={disableRadius ? () => {} : setRadius} />
+                    <Text style={{ color: '#a5b4fc', fontWeight: 'bold', fontSize: 16, marginTop: 8 }}>{radius} km</Text>
+                  </View>
+                  <View style={{ marginBottom: 24 }}>
+                    <Select value={estado} onChange={setEstado} options={estadosOptions} placeholder="Estado" />
+                  </View>
+                  <View>
+                    <Select value={municipio} onChange={setMunicipio} options={municipiosOptions} placeholder="Município" />
+                  </View>
                 </View>
-                <View style={{ marginBottom: 24 }}>
-                  <Select value={estado} onChange={setEstado} options={estadosOptions} placeholder="Estado" />
-                </View>
-                <View>
-                  <Select value={municipio} onChange={setMunicipio} options={municipiosOptions} placeholder="Município" />
-                </View>
-              </View>
+              </Pressable>
             )}
           </>
         )}
         {/* MAIN CONTENT */}
+        <MainContainer {...mainContainerProps}>
         <View style={{
           flex: 1,
           width: '100%',
           position: 'relative',
           alignItems: 'center',
           justifyContent: 'flex-start',
-          marginLeft: Platform.OS === 'web' && sidebarVisible ? 180 : 0,
-          paddingTop: Platform.OS === 'web' ? 32 : 60,
+          marginLeft: showSidebarWeb ? 180 : 0,
+          paddingTop: isWeb ? 32 : 60,
           paddingLeft: 0,
           paddingRight: 0,
         }}>
@@ -639,7 +661,12 @@ export default function FeedScreen() {
                     data={sortedFilteredPosts}
                     keyExtractor={item => item.id}
                     numColumns={numColumns}
-                    contentContainerStyle={{ paddingBottom: 120, paddingHorizontal: 0, paddingTop: 8, alignItems: 'center', justifyContent: 'center', gap: 16 }}
+                    contentContainerStyle={{
+                      paddingBottom: 120,
+                      paddingHorizontal: 16,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
                     {...(numColumns > 1 ? { columnWrapperStyle: { justifyContent: 'center', gap: 16 } } : {})}
                     renderItem={({ item }) => (
                       <Pressable
@@ -647,7 +674,7 @@ export default function FeedScreen() {
                         onPress={() => openModal(item)}
                         style={({ hovered, pressed }) => [
                           {
-                            width: 320,
+                            width: CARD_WIDTH,
                             borderRadius: 18,
                             backgroundColor: 'rgba(255,255,255,0.13)',
                             borderWidth: 1,
@@ -655,7 +682,7 @@ export default function FeedScreen() {
                             paddingHorizontal: 16,
                             paddingVertical: 12,
                             marginBottom: 12,
-                            marginHorizontal: 8,
+                            marginHorizontal: 4,
                             boxShadow: hovered ? '0 8px 32px 0 #a78bfa55' : '0 2px 12px #0002',
                             display: 'flex',
                             flexDirection: 'column',
@@ -664,6 +691,7 @@ export default function FeedScreen() {
                             transition: Platform.OS === 'web' ? 'all 0.18s cubic-bezier(.4,2,.6,1)' : undefined,
                             backdropFilter: Platform.OS === 'web' ? 'blur(10px)' : undefined,
                             opacity: pressed ? 0.85 : 1,
+                            zIndex: 1,
                           },
                         ]}
                       >
@@ -722,6 +750,7 @@ export default function FeedScreen() {
             </View>
           </View>
         </View>
+        </MainContainer>
         {/* Modal de comentários */}
         <RNModal
           visible={modalVisible}
@@ -832,7 +861,7 @@ export default function FeedScreen() {
           ) : (
             <View style={styles.modalOverlay}>
               <View
-                style={[styles.modalBox, { minWidth: '90%', position: 'relative' }]}
+                style={[styles.modalBox, { minWidth: '90%', maxWidth: 420, alignSelf: 'center', position: 'relative' }]}
                 onStartShouldSetResponder={() => true}
               >
                 {/* Botão X no canto superior direito - Mobile */}
