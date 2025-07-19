@@ -4,7 +4,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, QuerySnapshot, DocumentData } from 'firebase/firestore';
 import { db } from '../../firebase';
 import useTailwind from 'tailwind-rn';
-// Removido: import useAuth from '../../src/hooks/useAuth';
+import useAuth from '../../src/hooks/useAuth';
 
 type Comment = {
   id: string;
@@ -20,7 +20,7 @@ export default function CommentsScreen() {
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
   const tailwind = useTailwind();
-  // Removido: const { user } = useAuth();
+  const { user } = useAuth();
 
   useEffect(() => {
     if (!id) return;
@@ -46,7 +46,7 @@ export default function CommentsScreen() {
         text,
         createdAt: serverTimestamp(),
         // @ts-ignore
-        uid: '', // Removed user?.uid ?? ''
+        uid: user?.uid ?? '',
       });
       setText('');
     } catch (e) {

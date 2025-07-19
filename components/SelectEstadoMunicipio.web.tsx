@@ -44,18 +44,22 @@ export function Select({ value, onChange, options, placeholder, disabled, style 
         onClick={() => setOpen(v => !v)}
         style={{
           width: '100%',
-          background: 'rgba(255,255,255,0.18)',
+          background: 'rgba(40,40,70,0.95)',
           borderRadius: 10,
           border: '1px solid #a78bfa',
-          color: selected ? '#fff' : '#c7bfff',
+          color: selected ? '#fff' : '#a5b4fc',
           fontSize: 20,
           minHeight: 44,
-          padding: '10px 40px 10px 16px',
+          padding: '12px 40px 12px 18px',
           textAlign: 'left',
           outline: 'none',
           cursor: disabled ? 'not-allowed' : 'pointer',
           position: 'relative',
           margin: 0,
+          boxShadow: '0 2px 8px #312e8140',
+          fontWeight: 600,
+          letterSpacing: 0.2,
+          transition: 'background 0.18s',
           ...style,
         }}
       >
@@ -77,33 +81,39 @@ export function Select({ value, onChange, options, placeholder, disabled, style 
             top: '110%',
             left: 0,
             width: '100%',
-            background: '#fff',
-            borderRadius: 10,
-            boxShadow: '0 8px 32px #0002',
-            zIndex: 100,
-            maxHeight: 220,
+            background: '#232142',
+            borderRadius: 12,
+            boxShadow: '0 8px 32px #0008',
+            zIndex: 9999,
+            maxHeight: 260,
             overflowY: 'auto',
             border: '1px solid #a78bfa',
+            padding: 4,
           }}
         >
           {options.length === 0 && (
-            <div style={{ padding: 12, color: '#888', fontSize: 16 }}>Nenhuma opção</div>
+            <div style={{ padding: 14, color: '#a5b4fc', fontSize: 16 }}>Nenhuma opção</div>
           )}
           {options.map(opt => (
             <div
               key={opt.value}
               onClick={() => { onChange(opt.value); setOpen(false); }}
               style={{
-                padding: '10px 16px',
+                padding: '13px 20px',
                 cursor: 'pointer',
                 background: value === opt.value ? '#a78bfa' : 'transparent',
-                color: value === opt.value ? '#fff' : '#222',
+                color: value === opt.value ? '#fff' : '#e0e7ff',
                 fontWeight: value === opt.value ? 700 : 400,
                 fontSize: 17,
-                borderBottom: '1px solid #ede9fe',
+                borderBottom: '1px solid #312e81',
                 borderRadius: value === opt.value ? 8 : 0,
+                marginBottom: 2,
+                transition: 'background 0.15s',
+                textShadow: value === opt.value ? '0 1px 2px #312e81' : 'none',
               }}
               onMouseDown={e => e.preventDefault()}
+              onMouseEnter={e => (e.currentTarget.style.background = '#312e81')}
+              onMouseLeave={e => (e.currentTarget.style.background = value === opt.value ? '#a78bfa' : 'transparent')}
             >
               {opt.label}
             </div>

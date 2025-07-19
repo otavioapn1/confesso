@@ -6,8 +6,10 @@ import { db } from '../firebase';
 import { ResponsiveLinearGradient } from '../components/ResponsiveLinearGradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAllStates, getStateCities } from 'easy-location-br';
-import { Select } from '../components/SelectEstadoMunicipio';
+// import { Select } from '../components/SelectEstadoMunicipio';
 import { useNavigation } from '@react-navigation/native';
+import * as Location from 'expo-location';
+
 import { useUserLocation } from '../hooks/useUserLocation';
 
 const styles = StyleSheet.create({
@@ -114,13 +116,27 @@ function SelectWeb({ value, onChange, options, placeholder, disabled }: { value:
   );
 }
 
+// Função utilitária para reverse geocoding no web
+async function reverseGeocodeWeb({ latitude, longitude }: { latitude: number, longitude: number }) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&accept-language=pt-BR`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Erro ao buscar endereço');
+  const data = await response.json();
+  return {
+    region: data.address.state || '',
+    city: data.address.city || data.address.town || data.address.village || '',
+  };
+}
+
+function estadoParaSigla(nomeEstado: string) {
+  const estados = getAllStates();
+  const found = estados.find(e => e.name.toLowerCase() === nomeEstado.toLowerCase());
+  return found ? found.id : nomeEstado;
+}
+
 export default function PostScreen() {
   const [text, setText] = useState('');
-  const [estado, setEstado] = useState('');
-  const [municipio, setMunicipio] = useState('');
   const [loading, setLoading] = useState(false);
-  const [estados, setEstados] = useState<{ id: string; name: string }[]>([]);
-  const [municipios, setMunicipios] = useState<string[]>([]);
   const router = useRouter();
   const navigation = useNavigation();
   const { location, error: locationError, loading: locationLoading, refresh: refreshLocation } = useUserLocation();
@@ -130,44 +146,46 @@ export default function PostScreen() {
     navigation.setOptions({
       headerBackTitle: 'Segredos',
       headerBackVisible: true,
-      // Remover headerLeft customizado para não afetar outras telas
     });
   }, [navigation]);
 
-  useEffect(() => {
-    setEstados(getAllStates());
-  }, []);
+  // Remover useEffect de estados/municipios
 
-  useEffect(() => {
-    if (estado) {
-      const cidades = getStateCities(estado);
-      setMunicipios(Array.isArray(cidades) ? cidades.map((c: any) => (typeof c === 'string' ? c : c.name)) : []);
-      setMunicipio('');
-    } else {
-      setMunicipios([]);
-      setMunicipio('');
-    }
-  }, [estado]);
+  // Remover preenchimento automático de estado/municipio
 
   const handlePost = async () => {
+    console.log('Cliquei em postar');
     if (!text.trim()) {
+      console.log('Texto vazio');
       Alert.alert('Erro', 'Digite um segredo.');
       return;
     }
-    if (!estado.trim() || !municipio.trim()) {
-      Alert.alert('Erro', 'Informe o estado e município.');
-      return;
-    }
     if (!location) {
+      console.log('Localização não disponível');
       Alert.alert('Erro', 'Não foi possível obter sua localização.');
       return;
     }
     setLoading(true);
     try {
+      let atualEstado = '';
+      let atualMunicipio = '';
+      if (Platform.OS === 'web') {
+        console.log('Fazendo reverse geocoding web', location);
+        const geo = await reverseGeocodeWeb(location);
+        console.log('Resultado reverse geocoding web', geo);
+        atualEstado = estadoParaSigla(geo.region);
+        atualMunicipio = geo.city;
+      } else {
+        console.log('Fazendo reverse geocoding mobile', location);
+        const geo = await require('expo-location').reverseGeocodeAsync(location);
+        console.log('Resultado reverse geocoding mobile', geo);
+        atualEstado = estadoParaSigla(geo[0]?.region || '');
+        atualMunicipio = geo[0]?.city || '';
+      }
       await addDoc(collection(db, 'posts'), {
         text,
-        estado,
-        municipio,
+        estado: atualEstado,
+        municipio: atualMunicipio,
         createdAt: new Date().toISOString(),
         likes: 0,
         location: {
@@ -175,11 +193,11 @@ export default function PostScreen() {
           longitude: location.longitude,
         },
       });
+      console.log('Segredo enviado com sucesso!');
       setText('');
-      setEstado('');
-      setMunicipio('');
       router.replace('/'); // Redireciona para a página inicial (feed)
     } catch (e) {
+      console.error('Erro ao postar:', e);
       Alert.alert('Erro', 'Não foi possível postar.');
     }
     setLoading(false);
@@ -242,41 +260,7 @@ export default function PostScreen() {
             <Text style={{ color: '#a5b4fc', fontSize: 14, marginBottom: 8, alignSelf: 'flex-end', marginRight: 8 }}>
               {MAX_CHARS - text.length} caracteres restantes
             </Text>
-            <Text style={styles.info}>Você pode informar seu estado e município para ver e compartilhar segredos de pessoas próximas. Isso ajuda a criar conexões locais!</Text>
-            {/* Select de estado */}
-            <Select
-              value={estado}
-              onChange={setEstado}
-              options={estados.map(uf => ({ label: uf.name, value: uf.id }))}
-              placeholder="Selecione o estado"
-              disabled={loading}
-              style={{
-                background: 'rgba(255,255,255,0.18)',
-                borderRadius: 10,
-                border: '1.5px solid #a78bfa',
-                color: '#fff',
-                fontSize: 18,
-                minHeight: 48,
-                marginBottom: 10,
-              }}
-            />
-            {/* Select de município */}
-            <Select
-              value={municipio}
-              onChange={setMunicipio}
-              options={municipios.map(m => ({ label: m, value: m }))}
-              placeholder="Selecione o município"
-              disabled={loading || !estado}
-              style={{
-                background: 'rgba(255,255,255,0.18)',
-                borderRadius: 10,
-                border: '1.5px solid #a78bfa',
-                color: '#fff',
-                fontSize: 18,
-                minHeight: 48,
-                marginBottom: 10,
-              }}
-            />
+            <Text style={styles.info}>Sua localização será usada automaticamente para associar o segredo à sua região. Nenhuma informação pessoal é salva.</Text>
             <TouchableOpacity
               style={styles.button}
               onPress={handlePost}

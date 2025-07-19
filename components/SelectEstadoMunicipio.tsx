@@ -14,31 +14,9 @@ type Props = {
 
 export function Select({ value, onChange, options, placeholder, disabled, style }: Props) {
   if (Platform.OS === 'web') {
-    return (
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        disabled={disabled}
-        style={{
-          width: '100%',
-          background: 'rgba(255,255,255,0.18)',
-          borderRadius: 10,
-          border: '1px solid #a78bfa',
-          color: '#fff',
-          fontSize: 15,
-          marginBottom: 10,
-          minHeight: 44,
-          padding: 10,
-          outline: 'none',
-          ...style,
-        }}
-      >
-        <option value="" disabled>{placeholder}</option>
-        {options.map(opt => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-      </select>
-    );
+    // Importa o Select customizado para web
+    const WebSelect = require('./SelectEstadoMunicipio.web').Select;
+    return <WebSelect value={value} onChange={onChange} options={options} placeholder={placeholder} disabled={disabled} style={style} />;
   } else {
     const { Picker } = require('@react-native-picker/picker');
     return (

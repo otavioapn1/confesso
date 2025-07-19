@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Pressable, Platform, ScrollView, FlatList, TextInput, StyleSheet, Dimensions, Animated, Easing } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Pressable, Platform, ScrollView, FlatList, TextInput, StyleSheet, Dimensions, Animated, Easing, KeyboardAvoidingView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { collection, query, orderBy, onSnapshot, QuerySnapshot, DocumentData, updateDoc, doc, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -14,10 +14,8 @@ import { usePersistentLocationPermission } from '../hooks/usePersistentLocationP
 import Modal from 'react-native-modal';
 import { Modal as RNModal } from 'react-native';
 import * as Location from 'expo-location';
-import { Select } from '../components/SelectEstadoMunicipio';
 import { getAllStates, getStateCities } from 'easy-location-br';
 
-// Estilo para reticências multiline no web
 const webEllipsisStyle = Platform.OS === 'web' ? {
   display: '-webkit-box',
   WebkitLineClamp: 4,
@@ -161,13 +159,23 @@ function RadiusSlider({ value, onChange }) {
   );
 }
 
+// Substituir o Select por react-select no web
+let Select = require('../components/SelectEstadoMunicipio').Select;
+let isWeb = Platform.OS === 'web';
+let ReactSelect: any = null;
+if (isWeb) {
+  try {
+    ReactSelect = require('react-select').default;
+  } catch {}
+}
+
 export default function FeedScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [liking, setLiking] = useState<string | null>(null);
   const [fabPressed, setFabPressed] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
-  const [comments, setComments] = useState<Comment[] | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [commentsPage, setCommentsPage] = useState<any>(null);
@@ -187,9 +195,8 @@ export default function FeedScreen() {
   const [originalEstado, setOriginalEstado] = useState('');
   const [originalMunicipio, setOriginalMunicipio] = useState('');
   const [disableRadius, setDisableRadius] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(9);
 
-  // Sidebar/drawer responsivo
-  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile: inicia fechado
   const isWeb = Platform.OS === 'web';
   const [windowWidth, setWindowWidth] = useState(
     Platform.OS === 'web' && typeof window !== 'undefined' ? window.innerWidth : 1200
@@ -201,10 +208,6 @@ export default function FeedScreen() {
       return () => window.removeEventListener('resize', handleResize);
     }
   }, []);
-  const showSidebarWeb = Platform.OS === 'web' && windowWidth > 700;
-
-  // Remover injeção de CSS global para header sticky e responsividade
-  // Remover lógica de showHeader e qualquer referência ao header/topo
 
   const { location, error: locationError, loading: locationLoading, refresh: refreshLocation } = useUserLocation();
   const [radius, setRadius] = useState(10);
@@ -212,7 +215,6 @@ export default function FeedScreen() {
   const { secrets, loading, error, refresh } = useSecretsNearby(location, radius);
   const { granted: locationGranted, loading: permLoading, showModal, onTryAgain, onOpenSettings, deniedForever, requestPermission } = usePersistentLocationPermission();
 
-  // Persistir raio em AsyncStorage
   useEffect(() => {
     (async () => {
       const stored = await AsyncStorage.getItem('feed_radius_km');
@@ -224,7 +226,6 @@ export default function FeedScreen() {
     if (!radiusLoading) AsyncStorage.setItem('feed_radius_km', String(radius));
   }, [radius, radiusLoading]);
 
-  // Carregar posts para todos os usuários
   useEffect(() => {
     const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(
@@ -241,7 +242,6 @@ export default function FeedScreen() {
     };
   }, []);
 
-  // Buscar quantidade de comentários de cada post
   useEffect(() => {
     if (posts.length === 0) return;
     const unsubscribes: (() => void)[] = [];
@@ -255,28 +255,22 @@ export default function FeedScreen() {
     return () => { unsubscribes.forEach(u => u()); };
   }, [posts.length]);
 
-  // Listener em tempo real para comentários do post selecionado
   useEffect(() => {
-    console.log('Modal:', modalVisible, 'SelectedPost:', selectedPost);
     if (!modalVisible || !selectedPost) return;
-    setComments(null);
+    setComments([]);
     setCommentsLoading(true);
     const q = query(collection(db, 'posts', selectedPost.id, 'comments'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      console.log('Snapshot size:', snapshot.size, 'docs:', snapshot.docs.map(d => d.data()));
       const newComments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Comment));
       setComments(newComments);
-      setCommentsLoading(false);
-      console.log('Listener de comentários disparado:', newComments);
+      setCommentsLoading(false); // Garante que o loading sempre termina, mesmo sem comentários
     }, (err) => {
       setCommentsLoading(false);
-      console.error('Erro ao buscar comentários:', err);
       alert('Erro ao buscar comentários: ' + (err?.message || err));
     });
     return () => unsubscribe();
   }, [modalVisible, selectedPost]);
 
-  // Função para ordenar os posts
   const sortedPosts = React.useMemo(() => {
     let arr = [...posts];
     if (sortBy === 'likes') {
@@ -293,16 +287,13 @@ export default function FeedScreen() {
     return arr;
   }, [posts, sortBy]);
 
-  // Ordenar comentários conforme filtro selecionado
   const sortedComments = React.useMemo(() => {
     if (commentSortBy === 'likes') {
       return [...comments || []].sort((a, b) => (b.likes || 0) - (a.likes || 0));
     }
-    // recent (default)
     return [...comments || []];
   }, [comments, commentSortBy]);
 
-  // Obter estado e município via reverse geocoding
   useEffect(() => {
     async function fetchAddress() {
       if (location) {
@@ -320,40 +311,32 @@ export default function FeedScreen() {
     fetchAddress();
   }, [location]);
 
-  // Carregar lista de estados
   useEffect(() => {
     setEstados(getAllStates());
   }, []);
-  // Carregar lista de municípios ao trocar estado
   useEffect(() => {
     if (estado) {
       const cidades = getStateCities(estado);
       setMunicipios(Array.isArray(cidades) ? cidades.map((c: any) => (typeof c === 'string' ? c : c.name)) : []);
-      // Só limpar o município se ele não foi definido pelo reverse geocoding
       setMunicipio(prev => prev && municipios.includes(prev) ? prev : '');
     } else {
       setMunicipios([]);
       setMunicipio('');
     }
   }, [estado]);
-  // Lógica de ativação/desativação do filtro de raio
   useEffect(() => {
     if (estado !== originalEstado || municipio !== originalMunicipio) setDisableRadius(true);
     else setDisableRadius(false);
   }, [estado, municipio, originalEstado, originalMunicipio]);
 
-  // Atualizar a filtragem dos cards:
   const filteredByLocation = React.useMemo(() => {
     if (!locationGranted) return [];
     if (disableRadius && estado && municipio) {
-      // Filtrar por estado e município
       return secrets.filter(s => s.estado === estado && s.municipio === municipio);
     }
-    // Filtrar por raio normalmente
     return secrets;
   }, [secrets, locationGranted, disableRadius, estado, municipio]);
 
-  // Atualizar a ordenação para usar filteredByLocation
   const sortedFilteredPosts = React.useMemo(() => {
     let arr = [...filteredByLocation];
     if (sortBy === 'likes') {
@@ -370,7 +353,18 @@ export default function FeedScreen() {
     return arr;
   }, [filteredByLocation, sortBy]);
 
-  // Função para animar o like
+  // Corrigir o useEffect para não causar loop infinito
+  useEffect(() => {
+    setVisibleCount(9);
+  }, [estado, municipio, radius, sortBy, disableRadius]); // coloque aqui apenas os filtros reais
+
+  // Função para carregar mais cards ao chegar no fim do scroll
+  const handleLoadMore = () => {
+    if (visibleCount < sortedFilteredPosts.length) {
+      setVisibleCount(prev => Math.min(prev + 9, sortedFilteredPosts.length));
+    }
+  };
+
   const triggerLikeAnim = (id: string) => {
     if (!likeAnim[id]) {
       setLikeAnim(prev => ({ ...prev, [id]: new Animated.Value(1) }));
@@ -418,7 +412,6 @@ export default function FeedScreen() {
     setCommentsEnd(false);
   };
 
-  // Atualizar handleAddPost para salvar estado e município
   const handleAddPost = async (text: string) => {
     await addDoc(collection(db, 'posts'), {
       text,
@@ -430,7 +423,6 @@ export default function FeedScreen() {
     });
   };
 
-  // Ao criar comentário, registrar data e hora
   const handleAddComment = async () => {
     if (!selectedPost || !commentText.trim()) return;
     setCommentsLoading(true);
@@ -456,36 +448,35 @@ export default function FeedScreen() {
     await updateDoc(ref, { likes: (comment?.likes || 0) + 1 });
   };
 
-  // Substituir numColumns fixo por cálculo dinâmico de colunas
   const getNumColumns = () => {
     if (isMobile) return 1;
     const minCardWidth = 320;
     return Math.max(1, Math.floor(width / (minCardWidth + 24)));
   };
 
-  // Calcular numColumns dinamicamente para o FlatList
   const numColumns = React.useMemo(() => {
     if (Platform.OS !== 'web') return getNumColumns();
-    // Para web, calcula baseado na largura da janela e sidebar
-    const sidebarW = showSidebarWeb ? 240 : 0;
-    const available = windowWidth - sidebarW - 80;
+    const available = windowWidth - 80;
     return Math.max(1, Math.floor(available / 380));
-  }, [showSidebarWeb, windowWidth]);
+  }, [windowWidth]);
 
   const shouldBlur = !locationGranted;
 
-  // Responsividade para filtros
   const isLargeScreen = width > 700;
 
-  // Remover opções de estados/municípios
   const estadosOptions = [{ label: 'Selecione o estado', value: '' }, ...estados.map(uf => ({ label: uf.name, value: uf.id }))];
   const municipiosOptions = [{ label: 'Selecione o município', value: '' }, ...municipios.map(m => ({ label: m, value: m }))];
 
-  // Ajuste: container principal com ScrollView no mobile
-  const MainContainer = Platform.OS === 'web' ? View : ScrollView;
-  const mainContainerProps = Platform.OS === 'web'
-    ? { style: { flex: 1 } }
-    : { contentContainerStyle: { flexGrow: 1, minHeight: 0, paddingBottom: 120 } };
+  // NOVO: Sempre ScrollView, centralização e padding
+  const MainContainer = ScrollView;
+  const mainContainerProps = {
+    contentContainerStyle: {
+      // alignItems: 'center', // Removido para evitar erro de tipagem
+      padding: 32,
+      flexGrow: 1,
+      paddingBottom: 120,
+    }
+  };
 
   if (locationError || (!location && !locationLoading)) {
     return (
@@ -514,475 +505,355 @@ export default function FeedScreen() {
   return (
     <ResponsiveLinearGradient colors={["#0f0c29", "#302b63", "#24243e"]} style={styles.gradient}>
       <SafeAreaView style={[styles.safe, { minHeight: '100%', flex: 1 }]}>
-        {/* SIDEBAR WEB */}
-        {showSidebarWeb && (
-          <div style={{
-            position: 'fixed',
-            left: 0,
-            top: 0,
-            width: 180,
-            height: '100vh',
-            background: 'rgba(24,24,48,0.92)',
-            zIndex: 100,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 18,
-            padding: '16px 8px',
-            alignItems: 'center',
-            boxShadow: '2px 0 16px #0002',
-            backdropFilter: 'blur(6px)',
-          }}>
-            <button onClick={() => setSidebarOpen(false)} style={{ alignSelf: 'flex-end', background: 'none', border: 'none', color: '#a5b4fc', fontSize: 20, cursor: 'pointer', marginBottom: 8, marginRight: 2 }}>×</button>
-            <div style={{ marginBottom: 12, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13, marginBottom: 4, textAlign: 'center' }}>Raio:</Text>
-              <div style={{ width: 150, maxWidth: '100%', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <RadiusSlider value={radius} onChange={disableRadius ? () => {} : setRadius} />
-                <span style={{ color: '#a5b4fc', fontWeight: 700, fontSize: 13, minWidth: 28 }}>{radius}km</span>
-              </div>
-            </div>
-            <div style={{ marginBottom: 10, width: '100%' }}>
-              <Select value={estado} onChange={setEstado} options={estadosOptions} placeholder="Estado" />
-            </div>
-            <div style={{ width: '100%' }}>
-              <Select value={municipio} onChange={setMunicipio} options={municipiosOptions} placeholder="Município" />
-            </div>
-            <div style={{ marginTop: 24, width: '100%', display: 'flex', justifyContent: 'center' }}>
-              <button
-                onClick={() => {
-                  setEstado(originalEstado || '');
-                  setMunicipio(originalMunicipio || '');
-                  setRadius(10);
-                }}
-                style={{ background: '#a5b4fc', color: '#fff', border: 'none', borderRadius: 10, padding: '8px 22px', fontWeight: 'bold', fontSize: 15, cursor: 'pointer', boxShadow: '0 2px 8px #a5b4fc33' }}
-              >
-                Limpar filtros
-              </button>
-            </div>
-          </div>
-        )}
-        {Platform.OS === 'web' && !showSidebarWeb && (
-          <button onClick={() => setSidebarOpen(true)} style={{ position: 'fixed', top: 14, left: 14, zIndex: 101, background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 18, cursor: 'pointer' }}>☰ Filtros</button>
-        )}
-        {/* SIDEBAR MOBILE (off-canvas) */}
-        {Platform.OS !== 'web' && (
-          <>
-            <TouchableOpacity
-              style={{ position: 'absolute', top: 18, left: 18, zIndex: 200, backgroundColor: '#6366f1', borderRadius: 8, padding: 10 }}
-              onPress={() => setSidebarOpen(true)}
-            >
-              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 20 }}>☰ Filtros</Text>
-            </TouchableOpacity>
-            {sidebarOpen && (
-              <Pressable
-                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#181830ee', zIndex: 300, paddingTop: 48, paddingHorizontal: 24, justifyContent: 'flex-start' }}
-                onPress={() => setSidebarOpen(false)}
-              >
-                <View onStartShouldSetResponder={() => true} onTouchStart={e => e.stopPropagation()} style={{ width: '100%' }}>
-                  <TouchableOpacity style={{ position: 'absolute', top: 24, right: 24, zIndex: 301 }} onPress={() => setSidebarOpen(false)}>
-                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 28 }}>×</Text>
-                  </TouchableOpacity>
-                  <View style={{ marginBottom: 24 }}>
-                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>Filtrar segredos em até:</Text>
+        <MainContainer {...mainContainerProps}>
+          <FlatList
+            key={`columns-${numColumns}`}
+            data={sortedFilteredPosts.slice(0, visibleCount)}
+            keyExtractor={item => item.id}
+            numColumns={numColumns}
+            contentContainerStyle={{
+              paddingBottom: 120,
+              paddingHorizontal: 16,
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%',
+              maxWidth: 1100,
+              marginLeft: 'auto',
+              marginRight: 'auto',
+            }}
+            {...(numColumns > 1 ? { columnWrapperStyle: { justifyContent: 'center', gap: 16 } } : {})}
+            ListHeaderComponent={
+              <>
+                {/* Filtros centralizados */}
+                <View style={{ width: '100%', maxWidth: 420, marginTop: 0, marginBottom: 32, alignSelf: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, position: 'relative', zIndex: 9999 }}>
+                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13, marginBottom: 4, textAlign: 'center' }}>Filtre por Raio de localização:</Text>
+                  <View style={{ width: 260, maxWidth: '100%', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <RadiusSlider value={radius} onChange={disableRadius ? () => {} : setRadius} />
-                    <Text style={{ color: '#a5b4fc', fontWeight: 'bold', fontSize: 16, marginTop: 8 }}>{radius} km</Text>
+                    <Text style={{ color: '#a5b4fc', fontWeight: 'bold', fontSize: 13 }}>{`${radius} km`}</Text>
                   </View>
-                  <View style={{ marginBottom: 24 }}>
+                  {/* Estado */}
+                  {isWeb ? (
+                    <div style={{ width: '100%', maxWidth: 420, zIndex: 9999 }}>
+                      <ReactSelect
+                        value={estadosOptions.find(opt => opt.value === estado)}
+                        onChange={opt => setEstado(opt?.value || '')}
+                        options={estadosOptions}
+                        placeholder="Selecione o estado"
+                        isDisabled={false}
+                        menuPortalTarget={typeof window !== 'undefined' ? window.document.body : null}
+                        styles={{
+                          control: (base: any) => ({
+                            ...base,
+                            background: 'rgba(40,40,70,0.95)',
+                            borderColor: '#a78bfa',
+                            color: '#fff',
+                            minHeight: 44,
+                            borderRadius: 10,
+                            fontSize: 18,
+                          }),
+                          menu: (base: any) => ({
+                            ...base,
+                            background: '#232142',
+                            color: '#fff',
+                            zIndex: 99999,
+                          }),
+                          menuPortal: (base: any) => ({
+                            ...base,
+                            zIndex: 99999,
+                          }),
+                          option: (base: any, state: any) => ({
+                            ...base,
+                            background: state.isSelected
+                              ? '#a78bfa'
+                              : state.isFocused
+                              ? '#312e81'
+                              : 'transparent',
+                            color: '#fff',
+                            fontWeight: state.isSelected ? 700 : 400,
+                            fontSize: 17,
+                            padding: 12,
+                            cursor: 'pointer',
+                          }),
+                          singleValue: (base: any) => ({
+                            ...base,
+                            color: '#fff',
+                          }),
+                        }}
+                        theme={theme => ({
+                          ...theme,
+                          borderRadius: 10,
+                          colors: {
+                            ...theme.colors,
+                            primary25: '#312e81',
+                            primary: '#a78bfa',
+                            neutral0: '#232142',
+                            neutral80: '#fff',
+                          },
+                        })}
+                      />
+                    </div>
+                  ) : (
                     <Select value={estado} onChange={setEstado} options={estadosOptions} placeholder="Estado" />
-                  </View>
-                  <View>
+                  )}
+                  {/* Município */}
+                  {isWeb ? (
+                    <div style={{ width: '100%', maxWidth: 420, marginTop: 12, zIndex: 9999 }}>
+                      <ReactSelect
+                        value={municipiosOptions.find(opt => opt.value === municipio)}
+                        onChange={opt => setMunicipio(opt?.value || '')}
+                        options={municipiosOptions}
+                        placeholder="Selecione o município"
+                        isDisabled={false}
+                        menuPortalTarget={typeof window !== 'undefined' ? window.document.body : null}
+                        styles={{
+                          control: (base: any) => ({
+                            ...base,
+                            background: 'rgba(40,40,70,0.95)',
+                            borderColor: '#a78bfa',
+                            color: '#fff',
+                            minHeight: 44,
+                            borderRadius: 10,
+                            fontSize: 18,
+                          }),
+                          menu: (base: any) => ({
+                            ...base,
+                            background: '#232142',
+                            color: '#fff',
+                            zIndex: 99999,
+                          }),
+                          menuPortal: (base: any) => ({
+                            ...base,
+                            zIndex: 99999,
+                          }),
+                          option: (base: any, state: any) => ({
+                            ...base,
+                            background: state.isSelected
+                              ? '#a78bfa'
+                              : state.isFocused
+                              ? '#312e81'
+                              : 'transparent',
+                            color: '#fff',
+                            fontWeight: state.isSelected ? 700 : 400,
+                            fontSize: 17,
+                            padding: 12,
+                            cursor: 'pointer',
+                          }),
+                          singleValue: (base: any) => ({
+                            ...base,
+                            color: '#fff',
+                          }),
+                        }}
+                        theme={theme => ({
+                          ...theme,
+                          borderRadius: 10,
+                          colors: {
+                            ...theme.colors,
+                            primary25: '#312e81',
+                            primary: '#a78bfa',
+                            neutral0: '#232142',
+                            neutral80: '#fff',
+                          },
+                        })}
+                      />
+                    </div>
+                  ) : (
                     <Select value={municipio} onChange={setMunicipio} options={municipiosOptions} placeholder="Município" />
+                  )}
+                  <View style={{ marginTop: 12, width: '100%', display: 'flex', justifyContent: 'center', marginBottom: 32 }}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setEstado(originalEstado || '');
+                        setMunicipio(originalMunicipio || '');
+                        setRadius(10);
+                      }}
+                      style={{ backgroundColor: '#a5b4fc', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 22, alignItems: 'center', justifyContent: 'center', marginTop: 4 }}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Limpar filtros</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Botão Contar Segredo */}
+                <View style={{ width: '100%', maxWidth: 420, alignSelf: 'center', marginBottom: 40, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <TouchableOpacity
+                    style={{ backgroundColor: '#6366f1', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px #6366f155', width: '100%' }}
+                    onPress={() => router.push('/post')}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17 }}>Contar Segredo</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Tabs de ordenação */}
+                <View style={{ width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'row', justifyContent: 'center', marginBottom: 18, gap: 16, flexWrap: 'wrap' }}>
+                  <TouchableOpacity
+                    onPress={() => setSortBy('recent')}
+                    style={{ margin: 0, paddingVertical: 5, paddingHorizontal: 12, borderRadius: 16, backgroundColor: sortBy === 'recent' ? '#a78bfa' : 'rgba(255,255,255,0.10)', alignItems: 'center', minWidth: 110 }}
+                  >
+                    <Text style={{ color: sortBy === 'recent' ? '#fff' : '#a5b4fc', fontWeight: sortBy === 'recent' ? 'bold' : 'normal', fontSize: 15 }}>Mais recentes</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setSortBy('likes')}
+                    style={{ margin: 0, paddingVertical: 5, paddingHorizontal: 12, borderRadius: 16, backgroundColor: sortBy === 'likes' ? '#a78bfa' : 'rgba(255,255,255,0.10)', alignItems: 'center', minWidth: 110 }}
+                  >
+                    <Text style={{ color: sortBy === 'likes' ? '#fff' : '#a5b4fc', fontWeight: sortBy === 'likes' ? 'bold' : 'normal', fontSize: 15 }}>Mais curtidos</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setSortBy('comments')}
+                    style={{ margin: 0, paddingVertical: 5, paddingHorizontal: 12, borderRadius: 16, backgroundColor: sortBy === 'comments' ? '#a78bfa' : 'rgba(255,255,255,0.10)', alignItems: 'center', minWidth: 110 }}
+                  >
+                    <Text style={{ color: sortBy === 'comments' ? '#fff' : '#a5b4fc', fontWeight: sortBy === 'comments' ? 'bold' : 'normal', fontSize: 15 }}>Mais comentados</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            }
+            renderItem={({ item }) => (
+              <Pressable
+                key={item.id}
+                onPress={() => openModal(item)}
+                style={({ hovered, pressed }) => [
+                  {
+                    width: CARD_WIDTH,
+                    borderRadius: 18,
+                    backgroundColor: 'rgba(255,255,255,0.13)',
+                    borderWidth: 1,
+                    borderColor: '#a78bfa',
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    marginBottom: 12,
+                    marginHorizontal: 4,
+                    boxShadow: hovered ? '0 8px 32px 0 #a78bfa55' : '0 2px 12px #0002',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'flex-start',
+                    transition: Platform.OS === 'web' ? 'all 0.18s cubic-bezier(.4,2,.6,1)' : undefined,
+                    backdropFilter: Platform.OS === 'web' ? 'blur(10px)' : undefined,
+                    opacity: pressed ? 0.85 : 1,
+                    zIndex: 1,
+                  },
+                ]}
+              >
+                {Platform.OS === 'web' ? (
+                  <Text
+                    style={{
+                      ...styles.cardText,
+                      ...webEllipsisStyle,
+                      overflowWrap: 'break-word',
+                      marginTop: 8,
+                      textAlign: item.text.length < 40 ? 'center' : 'justify',
+                    } as any}
+                  >
+                    {item.text}
+                  </Text>
+                ) : (
+                  <Text style={[styles.cardText, { marginTop: 8, textAlign: item.text.length < 40 ? 'center' : 'justify' }]} numberOfLines={4} ellipsizeMode="tail"> 
+                    {item.text}
+                  </Text>
+                )}
+                {/* Distância e data agrupados */}
+                <View style={{ alignItems: 'center', gap: 2 }}>
+                  {item._distance !== undefined && item._distance !== null && (
+                    <Text style={{ color: '#a5b4fc', fontSize: 13, textAlign: 'center', marginTop: 0 }}>{item._distance.toFixed(1)} km de você</Text>
+                  )}
+                  <Text style={styles.cardDate}>{formatDate(item.createdAt)}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 10 }}>
+                  {/* Like animado */}
+                  <Pressable
+                    style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center' }, pressed && { opacity: 0.7 }]}
+                    onPress={() => handleLike(item)}
+                    disabled={liking === item.id}
+                  >
+                    <Animated.Text style={[styles.likeIcon, { color: likeColor[item.id] || '#ec4899', transform: [{ scale: likeAnim[item.id] || 1 }], marginRight: 6 }]}>❤️</Animated.Text>
+                    <Text style={styles.likeCount}>{item.likes || 0}</Text>
+                  </Pressable>
+                  {/* Comentários */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 18 }}>
+                    <Text style={{ fontSize: 20, color: '#a5b4fc', marginRight: 6, marginLeft: 2, top: 1 }}>💬</Text>
+                    <Text style={{ color: '#a5b4fc', fontWeight: 'bold', fontSize: 16 }}>{item.commentsCount || 0}</Text>
                   </View>
                 </View>
               </Pressable>
             )}
-          </>
-        )}
-        {/* MAIN CONTENT */}
-        <MainContainer {...mainContainerProps}>
-        <View style={{
-          flex: 1,
-          width: '100%',
-          position: 'relative',
-          alignItems: 'center',
-          justifyContent: 'flex-start',
-          marginLeft: showSidebarWeb ? 180 : 0,
-          paddingTop: isWeb ? 32 : 60,
-          paddingLeft: 0,
-          paddingRight: 0,
-        }}>
-          <View style={{ width: '100%', maxWidth: 1100, padding: 32, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            {/* Botão Contar Segredo e filtros centralizados */}
-            <div style={{ width: '100%', maxWidth: 900, display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '0 auto' }}>
-              <div style={{ width: 320, marginBottom: 32 }}>
-                <TouchableOpacity
-                  style={{ backgroundColor: '#6366f1', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px #6366f155' }}
-                  onPress={() => router.push('/post')}
-                  activeOpacity={0.85}
-                >
-                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17 }}>Contar Segredo</Text>
+            ListFooterComponent={
+              visibleCount < sortedFilteredPosts.length && (
+                <TouchableOpacity onPress={handleLoadMore} style={{ padding: 18, alignItems: 'center' }}>
+                  <Text style={{ color: '#a78bfa', fontSize: 18, fontWeight: 'bold' }}>Carregar mais</Text>
                 </TouchableOpacity>
-              </div>
-              {/* Tabs de ordenação - centralizadas, SEM SCROLL, wrap se necessário */}
-              <div style={{ width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'row', justifyContent: 'center', marginBottom: 18, gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => setSortBy('recent')}
-                  style={{ margin: 0, padding: '5px 12px', borderRadius: 16, background: sortBy === 'recent' ? '#a78bfa' : 'rgba(255,255,255,0.10)', color: sortBy === 'recent' ? '#fff' : '#a5b4fc', fontWeight: sortBy === 'recent' ? 'bold' : 'normal', border: 'none', cursor: 'pointer', fontSize: 15, minWidth: 110 }}
-                >
-                  Mais recentes
-                </button>
-                <button
-                  onClick={() => setSortBy('likes')}
-                  style={{ margin: 0, padding: '5px 12px', borderRadius: 16, background: sortBy === 'likes' ? '#a78bfa' : 'rgba(255,255,255,0.10)', color: sortBy === 'likes' ? '#fff' : '#a5b4fc', fontWeight: sortBy === 'likes' ? 'bold' : 'normal', border: 'none', cursor: 'pointer', fontSize: 15, minWidth: 110 }}
-                >
-                  Mais curtidos
-                </button>
-                <button
-                  onClick={() => setSortBy('comments')}
-                  style={{ margin: 0, padding: '5px 12px', borderRadius: 16, background: sortBy === 'comments' ? '#a78bfa' : 'rgba(255,255,255,0.10)', color: sortBy === 'comments' ? '#fff' : '#a5b4fc', fontWeight: sortBy === 'comments' ? 'bold' : 'normal', border: 'none', cursor: 'pointer', fontSize: 15, minWidth: 110 }}
-                >
-                  Mais comentados
-                </button>
-              </div>
-            </div>
-            {/* Feed de cards centralizado e responsivo */}
-            <View style={{ flex: 1, width: '100%', maxWidth: 1100, alignItems: 'center', justifyContent: 'center', marginTop: 8 }}>
-              {!locationGranted ? (
-                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                  <Text style={styles.empty}>Escolha e aplique um filtro para ver os segredos.</Text>
-                </View>
-              ) : (
-                filteredByLocation.length === 0 ? (
-                  <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text style={styles.empty}>🤫 Nenhum segredo postado nesse raio...</Text>
-                  </View>
+              )
+            }
+          />
+          {/* Modal de detalhes do card */}
+          <Modal
+            isVisible={modalVisible}
+            onBackdropPress={closeModal}
+            onBackButtonPress={closeModal}
+            useNativeDriver
+            style={{ margin: 0, justifyContent: 'center', alignItems: 'center' }}
+          >
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+            >
+              <View style={styles.modalBox}>
+                <Text style={styles.modalTitle}>Segredo</Text>
+                <Text style={styles.modalSecret}>{selectedPost?.text}</Text>
+                <Text style={styles.modalDate}>{selectedPost ? formatDate(selectedPost.createdAt) : ''}</Text>
+
+                {/* Comentários */}
+                <Text style={{ color: '#312e81', fontWeight: 'bold', fontSize: 15, marginBottom: 8, marginTop: 10 }}>Comentários</Text>
+                {commentsLoading ? (
+                  <ActivityIndicator color="#6366f1" style={{ marginVertical: 16 }} />
+                ) : comments && comments.length > 0 ? (
+                  <ScrollView style={styles.commentList}>
+                    {comments.map(comment => (
+                      <View key={comment.id} style={styles.commentBox}>
+                        <Text style={styles.commentText}>{comment.text}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, justifyContent: 'space-between' }}>
+                          <Text style={styles.commentDate}>{formatDate(comment.createdAt)}</Text>
+                          <TouchableOpacity onPress={() => handleLikeComment(comment.id)} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ color: '#ec4899', fontSize: 16, marginRight: 4 }}>❤️</Text>
+                            <Text style={{ color: '#ec4899', fontWeight: 'bold', fontSize: 14 }}>{comment.likes || 0}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ))}
+                  </ScrollView>
                 ) : (
-                  <FlatList
-                    key={`columns-${numColumns}`}
-                    data={sortedFilteredPosts}
-                    keyExtractor={item => item.id}
-                    numColumns={numColumns}
-                    contentContainerStyle={{
-                      paddingBottom: 120,
-                      paddingHorizontal: 16,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                    {...(numColumns > 1 ? { columnWrapperStyle: { justifyContent: 'center', gap: 16 } } : {})}
-                    renderItem={({ item }) => (
-                      <Pressable
-                        key={item.id}
-                        onPress={() => openModal(item)}
-                        style={({ hovered, pressed }) => [
-                          {
-                            width: CARD_WIDTH,
-                            borderRadius: 18,
-                            backgroundColor: 'rgba(255,255,255,0.13)',
-                            borderWidth: 1,
-                            borderColor: '#a78bfa',
-                            paddingHorizontal: 16,
-                            paddingVertical: 12,
-                            marginBottom: 12,
-                            marginHorizontal: 4,
-                            boxShadow: hovered ? '0 8px 32px 0 #a78bfa55' : '0 2px 12px #0002',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'flex-start',
-                            transition: Platform.OS === 'web' ? 'all 0.18s cubic-bezier(.4,2,.6,1)' : undefined,
-                            backdropFilter: Platform.OS === 'web' ? 'blur(10px)' : undefined,
-                            opacity: pressed ? 0.85 : 1,
-                            zIndex: 1,
-                          },
-                        ]}
-                      >
-                        {Platform.OS === 'web' ? (
-                          <Text
-                            style={{
-                              ...styles.cardText,
-                              ...webEllipsisStyle,
-                              overflowWrap: 'break-word',
-                              marginTop: 8,
-                              textAlign: item.text.length < 40 ? 'center' : 'justify',
-                            } as any}
-                          >
-                            {item.text}
-                          </Text>
-                        ) : (
-                          <Text style={[styles.cardText, { marginTop: 8, textAlign: item.text.length < 40 ? 'center' : 'justify' }]} numberOfLines={4} ellipsizeMode="tail"> 
-                            {item.text}
-                          </Text>
-                        )}
-                        {/* Distância e data agrupados */}
-                        <View style={{ alignItems: 'center', gap: 2 }}>
-                          {item._distance !== undefined && item._distance !== null && (
-                            <Text style={{ color: '#a5b4fc', fontSize: 13, textAlign: 'center', marginTop: 0 }}>{item._distance.toFixed(1)} km de você</Text>
-                          )}
-                          <Text style={styles.cardDate}>{formatDate(item.createdAt)}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 10 }}>
-                          {/* Like animado */}
-                          <Pressable
-                            style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center' }, pressed && { opacity: 0.7 }]}
-                            onPress={() => handleLike(item)}
-                            disabled={liking === item.id}
-                          >
-                            <Animated.Text style={[styles.likeIcon, { color: likeColor[item.id] || '#ec4899', transform: [{ scale: likeAnim[item.id] || 1 }], marginRight: 6 }]}>❤️</Animated.Text>
-                            <Text style={styles.likeCount}>{item.likes || 0}</Text>
-                          </Pressable>
-                          {/* Comentários */}
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 18 }}>
-                            <Text style={{ fontSize: 20, color: '#a5b4fc', marginRight: 6, marginLeft: 2, top: 1 }}>💬</Text>
-                            <Text style={{ color: '#a5b4fc', fontWeight: 'bold', fontSize: 16 }}>{item.commentsCount || 0}</Text>
-                          </View>
-                        </View>
-                      </Pressable>
-                    )}
+                  <Text style={styles.commentEmpty}>Nenhum comentário ainda.</Text>
+                )}
+
+                {/* Adicionar comentário */}
+                <View style={styles.commentInputRow}>
+                  <TextInput
+                    style={styles.commentInput}
+                    value={commentText}
+                    onChangeText={setCommentText}
+                    placeholder="Digite um comentário..."
+                    placeholderTextColor="#a5b4fc"
+                    editable={!commentsLoading}
                   />
-                )
-              )}
-              {shouldBlur && !permLoading && (
-                <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(30, 27, 75, 0.72)' }}>
-                  {Platform.OS !== 'web' && (
-                    <BlurView intensity={40} tint="dark" style={{ ...StyleSheet.absoluteFillObject }} />
-                  )}
+                  <TouchableOpacity onPress={handleAddComment} style={styles.commentSend} disabled={commentsLoading || !commentText.trim()}>
+                    <Text style={styles.commentSendText}>Enviar</Text>
+                  </TouchableOpacity>
                 </View>
-              )}
-            </View>
-          </View>
-        </View>
-        </MainContainer>
-        {/* Modal de comentários */}
-        <RNModal
-          visible={modalVisible}
-          animationType="slide"
-          transparent
-          onRequestClose={closeModal}
-        >
-          {Platform.OS === 'web' ? (
-            <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div
-                style={{
-                  ...styles.modalBox,
-                  minWidth: 320,
-                  maxHeight: 600,
-                  width: 420,
-                  margin: '0 auto',
-                  overflowY: 'auto',
-                  display: 'flex',
-                  justifyContent: 'flex-start',
-                  alignItems: 'stretch',
-                  position: 'relative',
-                }}
-                onClick={e => e.stopPropagation()}
-              >
-                {/* Botão X no canto superior direito */}
-                <button
-                  onClick={closeModal}
-                  style={{
-                    position: 'absolute',
-                    top: 16,
-                    right: 16,
-                    background: 'none',
-                    border: 'none',
-                    color: '#6366f1',
-                    fontSize: 24,
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    zIndex: 10,
-                    width: 32,
-                    height: 32,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: '50%',
-                    transition: 'background-color 0.2s',
-                  }}
-                  onMouseEnter={(e) => (e.target as HTMLElement).style.backgroundColor = '#f3f4f6'}
-                  onMouseLeave={(e) => (e.target as HTMLElement).style.backgroundColor = 'transparent'}
-                >
-                  ×
-                </button>
-                
-                {/* Conteúdo do modal web */}
-                <div style={{ maxHeight: 500, overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', paddingTop: 8, alignItems: 'stretch', width: '100%' }}>
-                  <style>{`
-                    .modal-comments::-webkit-scrollbar:horizontal { height: 0 !important; }
-                    .modal-comments { scrollbar-width: thin; scrollbar-color: #a5b4fc #f3f4f6; }
-                    .modal-comments { overflow-x: hidden !important; }
-                    .modal-comments { -ms-overflow-style: none; }
-                    .modal-comments::-webkit-scrollbar { height: 0 !important; width: 8px; background: transparent; }
-                  `}</style>
-                  <Text style={[styles.modalTitle, { textAlign: 'center', width: '100%' }]}>Segredo</Text>
-                  <Text style={[styles.modalSecret, { textAlign: 'justify', width: '100%', paddingHorizontal: 4 }]}> 
-                    {selectedPost?.text}
-                  </Text>
-                  <Text style={[styles.modalDate, { textAlign: 'center', width: '100%' }]}>{selectedPost && formatDate(selectedPost.createdAt)}</Text>
-                  <Text style={{ fontWeight: 'bold', color: '#312e81', fontSize: 16, marginTop: 12, marginBottom: 4, textAlign: 'center', width: '100%' }}>Comentários</Text>
-                  <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', marginBottom: 8, width: '100%' }}>
-                    <button onClick={() => setCommentSortBy('recent')} style={{ margin: '0 8px', padding: '4px 12px', borderRadius: 16, background: commentSortBy === 'recent' ? '#a78bfa' : 'transparent', color: '#312e81', fontWeight: commentSortBy === 'recent' ? 'bold' : 'normal', border: 'none', cursor: 'pointer' }}>Mais recentes</button>
-                    <button onClick={() => setCommentSortBy('likes')} style={{ margin: '0 8px', padding: '4px 12px', borderRadius: 16, background: commentSortBy === 'likes' ? '#a78bfa' : 'transparent', color: '#312e81', fontWeight: commentSortBy === 'likes' ? 'bold' : 'normal', border: 'none', cursor: 'pointer' }}>Mais curtidos</button>
-                  </div>
-                  <div className="modal-comments" style={{ minHeight: 120, maxHeight: 180, overflowY: 'auto', overflowX: 'hidden', marginBottom: 8, width: '100%' }}>
-                    {comments === null ? (
-                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 80 }}><ActivityIndicator color="#5B0FFF" /></div>
-                    ) : (
-                      comments.length === 0 ? <Text style={[styles.commentEmpty, { textAlign: 'center', width: '100%' }]}>Nenhum comentário ainda...</Text> :
-                      sortedComments.map(item => (
-                        <div key={item.id} style={{ marginBottom: 10, padding: 8, background: '#eef2ff', borderRadius: 12, width: '100%', boxSizing: 'border-box', paddingRight: 16 }}>
-                          <Text style={[styles.commentText, { width: '100%' }]}>{item.text}</Text>
-                          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', marginTop: 6, justifyContent: 'space-between', width: '100%' }}>
-                            <Text style={styles.commentDate}>{formatDate(item.createdAt)}</Text>
-                            <button onClick={() => handleLikeComment(item.id)} style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', marginRight: 4 }}>
-                              <span style={{ color: '#ec4899', fontSize: 18, marginRight: 4 }}>❤️</span>
-                              <span style={{ color: '#ec4899', fontWeight: 'bold', fontSize: 15 }}>{item.likes || 0}</span>
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', marginTop: 8, width: '100%' }}>
-                    <input
-                      style={{ flex: 1, border: '1px solid #a5b4fc', borderRadius: 8, padding: '8px 12px', color: '#312e81', background: '#fff', marginRight: 8 }}
-                      placeholder="Comente anonimamente..."
-                      value={commentText}
-                      onChange={e => setCommentText(e.target.value)}
-                      disabled={comments === null}
-                    />
-                    <button
-                      style={{ background: '#ec4899', borderRadius: 20, padding: '8px 18px', color: '#fff', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}
-                      onClick={handleAddComment}
-                      disabled={comments === null || !commentText.trim()}
-                    >Enviar</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <View style={styles.modalOverlay}>
-              <View
-                style={[styles.modalBox, { minWidth: '90%', maxWidth: 420, alignSelf: 'center', position: 'relative' }]}
-                onStartShouldSetResponder={() => true}
-              >
-                {/* Botão X no canto superior direito - Mobile */}
-                <TouchableOpacity
-                  onPress={closeModal}
-                  style={{
-                    position: 'absolute',
-                    top: 16,
-                    right: 16,
-                    zIndex: 10,
-                    width: 32,
-                    height: 32,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: 16,
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={{ color: '#6366f1', fontSize: 24, fontWeight: 'bold' }}>×</Text>
+                <TouchableOpacity onPress={closeModal} style={{ marginTop: 18, alignSelf: 'center' }}>
+                  <Text style={{ color: '#6366f1', fontWeight: 'bold', fontSize: 16 }}>Fechar</Text>
                 </TouchableOpacity>
-                
-                {/* Conteúdo do modal mobile */}
-                <ScrollView style={{ maxHeight: '70%' }} contentContainerStyle={{ flexGrow: 1, flexDirection: 'column', justifyContent: 'flex-start', paddingTop: 8, alignItems: 'stretch', width: '100%' }}>
-                  <Text style={[styles.modalTitle, { textAlign: 'center', width: '100%' }]}>Segredo</Text>
-                  <Text style={[styles.modalSecret, { textAlign: 'justify', width: '100%', paddingHorizontal: 4 }]}> 
-                    {selectedPost?.text}
-                  </Text>
-                  <Text style={[styles.modalDate, { textAlign: 'center', width: '100%' }]}>{selectedPost && formatDate(selectedPost.createdAt)}</Text>
-                  <Text style={{ fontWeight: 'bold', color: '#312e81', fontSize: 16, marginTop: 12, marginBottom: 4, textAlign: 'center', width: '100%' }}>Comentários</Text>
-                  <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 8, width: '100%' }}>
-                    <TouchableOpacity onPress={() => setCommentSortBy('recent')} style={{ marginHorizontal: 8, paddingVertical: 4, paddingHorizontal: 12, borderRadius: 16, backgroundColor: commentSortBy === 'recent' ? '#a78bfa' : 'transparent' }}>
-                      <Text style={{ color: '#312e81', fontWeight: commentSortBy === 'recent' ? 'bold' : 'normal' }}>Mais recentes</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setCommentSortBy('likes')} style={{ marginHorizontal: 8, paddingVertical: 4, paddingHorizontal: 12, borderRadius: 16, backgroundColor: commentSortBy === 'likes' ? '#a78bfa' : 'transparent' }}>
-                      <Text style={{ color: '#312e81', fontWeight: commentSortBy === 'likes' ? 'bold' : 'normal' }}>Mais curtidos</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={[styles.commentList, { width: '100%' }]}>
-                    {commentsLoading && comments === null ? (
-                      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator color="#5B0FFF" /></View>
-                    ) : (
-                      <FlatList
-                        data={sortedComments}
-                        keyExtractor={item => item.id}
-                        renderItem={({ item }) => (
-                          <View style={[styles.commentBox, { width: '100%' }]}>
-                            <Text style={[styles.commentText, { width: '100%' }]}>{item.text}</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, justifyContent: 'space-between', width: '100%' }}>
-                              <Text style={styles.commentDate}>{formatDate(item.createdAt)}</Text>
-                              <Pressable
-                                style={{ flexDirection: 'row', alignItems: 'center' }}
-                                onPress={() => handleLikeComment(item.id)}
-                              >
-                                <Text style={{ color: '#ec4899', fontSize: 18, marginRight: 4 }}>❤️</Text>
-                                <Text style={{ color: '#ec4899', fontWeight: 'bold', fontSize: 15 }}>{item.likes || 0}</Text>
-                              </Pressable>
-                            </View>
-                          </View>
-                        )}
-                        ListEmptyComponent={<Text style={[styles.commentEmpty, { textAlign: 'center', width: '100%' }]}>Nenhum comentário ainda...</Text>}
-                      />
-                    )}
-                  </View>
-                  <View style={[styles.commentInputRow, { width: '100%' }]}>
-                    <TextInput
-                      style={styles.commentInput}
-                      placeholder="Comente anonimamente..."
-                      placeholderTextColor="#a5b4fc"
-                      value={commentText}
-                      onChangeText={setCommentText}
-                      editable={comments === null}
-                    />
-                    <TouchableOpacity
-                      style={styles.commentSend}
-                      onPress={handleAddComment}
-                      disabled={comments === null || !commentText.trim()}
-                    >
-                      <Text style={styles.commentSendText}>Enviar</Text>
-                    </TouchableOpacity>
-                  </View>
-                </ScrollView>
               </View>
+            </KeyboardAvoidingView>
+          </Modal>
+          {shouldBlur && !permLoading && (
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(30, 27, 75, 0.72)' }}>
+              {Platform.OS !== 'web' && (
+                <BlurView intensity={40} tint="dark" style={{ ...StyleSheet.absoluteFillObject }} />
+              )}
             </View>
           )}
-        </RNModal>
-        {/* Modal insistente de permissão */}
-        <Modal isVisible={showModal} backdropOpacity={0.7} animationIn="fadeIn" animationOut="fadeOut" useNativeDriver>
-          <View style={{ backgroundColor: '#312e81', borderRadius: 18, padding: 28, alignItems: 'center' }}>
-            <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 18 }}>
-              O app Confesso precisa da sua localização para mostrar segredos próximos. Por favor, ative a localização para continuar.
-            </Text>
-            <Text style={{ color: '#a5b4fc', fontSize: 16, textAlign: 'center', marginBottom: 28 }}>
-              Sua localização nunca será compartilhada. Apenas a distância é registrada, mantendo seu anonimato.
-            </Text>
-            <TouchableOpacity
-              style={{ backgroundColor: '#ec4899', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}
-              onPress={requestPermission}
-              activeOpacity={0.85}
-            >
-              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 18 }}>Permitir localização</Text>
-            </TouchableOpacity>
-            {deniedForever && (
-              <TouchableOpacity
-                style={{ backgroundColor: '#6366f1', borderRadius: 14, paddingVertical: 12, paddingHorizontal: 28, alignItems: 'center', justifyContent: 'center' }}
-                onPress={onOpenSettings}
-                activeOpacity={0.85}
-              >
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Abrir configurações</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </Modal>
-        {/* Toast de comentário enviado */}
-        {commentToast && (
-          <View style={{ position: 'absolute', bottom: 100, left: 0, right: 0, alignItems: 'center', zIndex: 100 }}>
-            <View style={{ backgroundColor: '#22c55e', borderRadius: 16, paddingHorizontal: 24, paddingVertical: 12, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8 }}>
-              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Comentário enviado!</Text>
-            </View>
-          </View>
-        )}
+        </MainContainer>
       </SafeAreaView>
     </ResponsiveLinearGradient>
   );
-} 
+}
